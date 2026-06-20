@@ -34,7 +34,7 @@ jobs:
           kind load docker-image imd-weather-ui:${{ github.sha }} --name $env:KIND_CLUSTER_NAME
 
       - name: Deploy app to cluster
-        shell: pwsh
+        shell: windows-latest
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
         run: |
