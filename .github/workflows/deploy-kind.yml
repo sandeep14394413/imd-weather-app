@@ -1,0 +1,60 @@
+name: Deploy IMD Weather App to kind
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: kind cluster name
+        required: false
+        default: kind
+
+env:
+  KIND_CLUSTER_NAME: ${{ inputs.cluster_name || 'kind' }}
+  NAMESPACE: imd-weather
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build app images
+        shell: pwsh
+        run: |
+          docker build -f Dockerfile.api -t imd-weather-api:${{ github.sha }} .
+          docker build -f Dockerfile.ui -t imd-weather-ui:${{ github.sha }} .
+
+      - name: Load app images into kind
+        shell: pwsh
+        run: |
+          kind load docker-image imd-weather-api:${{ github.sha }} --name $env:KIND_CLUSTER_NAME
+          kind load docker-image imd-weather-ui:${{ github.sha }} --name $env:KIND_CLUSTER_NAME
+
+      - name: Deploy app to cluster
+        shell: pwsh
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          kubectl apply -f k8s/00-namespace.yaml
+          $secret = if ($env:JWT_SECRET) { $env:JWT_SECRET } else { "change-this-secret-before-production" }
+          kubectl -n $env:NAMESPACE create secret generic imd-weather-app-secret `
+            --from-literal=jwt-secret=$secret `
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f k8s/10-api.yaml
+          kubectl apply -f k8s/20-ui.yaml
+          kubectl -n $env:NAMESPACE set image deployment/imd-weather-api api=imd-weather-api:${{ github.sha }}
+          kubectl -n $env:NAMESPACE set image deployment/imd-weather-ui ui=imd-weather-ui:${{ github.sha }}
+          kubectl -n $env:NAMESPACE rollout status deployment/imd-weather-api --timeout=180s
+          kubectl -n $env:NAMESPACE rollout status deployment/imd-weather-ui --timeout=180s
+
+      - name: Verify app can reach ML service
+        shell: pwsh
+        run: |
+          $body = @{ state = "Delhi"; district = "New Delhi"; target_date = "2026-11-15" } | ConvertTo-Json
+          kubectl -n $env:NAMESPACE run app-smoke-test --rm -i --restart=Never --image=curlimages/curl:8.11.1 -- `
+            curl -fsS -X POST http://imd-weather-api:8000/forecast `
+            -H "Content-Type: application/json" `
+            -d "$body"

@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: imd-weather-ui
+  namespace: imd-weather
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: imd-weather-ui
+  template:
+    metadata:
+      labels:
+        app: imd-weather-ui
+    spec:
+      containers:
+        - name: ui
+          image: imd-weather-ui:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8501
+          env:
+            - name: API_URL
+              value: http://imd-weather-api:8000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8501
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8501
+            initialDelaySeconds: 30
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: imd-weather-ui
+  namespace: imd-weather
+spec:
+  selector:
+    app: imd-weather-ui
+  ports:
+    - name: http
+      port: 8501
+      targetPort: 8501

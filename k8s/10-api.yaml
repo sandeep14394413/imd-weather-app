@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: imd-weather-api
+  namespace: imd-weather
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: imd-weather-api
+  template:
+    metadata:
+      labels:
+        app: imd-weather-api
+    spec:
+      containers:
+        - name: api
+          image: imd-weather-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              value: sqlite:///./weather_app.db
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: imd-weather-app-secret
+                  key: jwt-secret
+            - name: MODEL_API_URL
+              value: http://imd-weather-ml:8010
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: imd-weather-api
+  namespace: imd-weather
+spec:
+  selector:
+    app: imd-weather-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
