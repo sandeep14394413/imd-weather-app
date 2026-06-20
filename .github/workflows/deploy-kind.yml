@@ -8,7 +8,7 @@ on:
       cluster_name:
         description: prod-cluster
         required: false
-        default: kind
+        default: prod-cluster
 
 env:
   KIND_CLUSTER_NAME: ${{ inputs.cluster_name || 'kind' }}
