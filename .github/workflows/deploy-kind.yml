@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       cluster_name:
-        description: kind cluster name
+        description: prod-cluster
         required: false
         default: kind
 
