@@ -1,140 +1,56 @@
-name: Deploy IMD Weather App
+name: Deploy IMD Weather App to kind
 
 on:
-
   push:
-
-    branches:
-
-      - main
-
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: kind cluster name
+        required: false
+        default: kind
 
 env:
-
-  CLUSTER_NAME: kind
-
+  KIND_CLUSTER_NAME: ${{ inputs.cluster_name || 'kind' }}
   NAMESPACE: imd-weather
 
 jobs:
-
   deploy:
-
     runs-on: self-hosted
-
-    defaults:
-
-      run:
-
-        shell: powershell
-
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-
-      - name: Verify tools
-
+      - name: Build app images
+        shell: powershell
         run: |
+          docker build -f Dockerfile.api -t imd-weather-api:${{ github.sha }} .
+          docker build -f Dockerfile.ui -t imd-weather-ui:${{ github.sha }} .
 
-          docker --version
-
-          kind version
-
-          kubectl version --client
-
-      - name: Build API image
-
+      - name: Load app images into kind
+        shell: powershell
         run: |
+          kind load docker-image imd-weather-api:${{ github.sha }} --name $env:KIND_CLUSTER_NAME
+          kind load docker-image imd-weather-ui:${{ github.sha }} --name $env:KIND_CLUSTER_NAME
 
-          docker build `
-            -f Dockerfile.api `
-            -t imd-weather-api:${{ github.sha }} `
-            .
-
-      - name: Build UI image
-
-        run: |
-
-          docker build `
-            -f Dockerfile.ui `
-            -t imd-weather-ui:${{ github.sha }} `
-            .
-
-      - name: Load images
-
-        run: |
-
-          kind load docker-image `
-            imd-weather-api:${{ github.sha }} `
-            --name $env:CLUSTER_NAME
-
-          kind load docker-image `
-            imd-weather-ui:${{ github.sha }} `
-            --name $env:CLUSTER_NAME
-
-      - name: Deploy app
-
+      - name: Deploy app to cluster
+        shell: powershell
         env:
-
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-
         run: |
-
-          kubectl apply `
-            -f k8s/00-namespace.yaml
-
-          if ($env:JWT_SECRET) {
-
-            $secret=$env:JWT_SECRET
-
-          }
-
-          else {
-
-            $secret="change-this-secret"
-
-          }
-
+          kubectl apply -f k8s/00-namespace.yaml
+          $secret = if ($env:JWT_SECRET) { $env:JWT_SECRET } else { "change-this-secret-before-production" }
           kubectl -n $env:NAMESPACE create secret generic imd-weather-app-secret `
             --from-literal=jwt-secret=$secret `
-            --dry-run=client `
-            -o yaml | kubectl apply -f -
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f k8s/10-api.yaml
+          kubectl apply -f k8s/20-ui.yaml
+          kubectl -n $env:NAMESPACE set image deployment/imd-weather-api api=imd-weather-api:${{ github.sha }}
+          kubectl -n $env:NAMESPACE set image deployment/imd-weather-ui ui=imd-weather-ui:${{ github.sha }}
+          kubectl -n $env:NAMESPACE rollout status deployment/imd-weather-api --timeout=180s
+          kubectl -n $env:NAMESPACE rollout status deployment/imd-weather-ui --timeout=180s
 
-          kubectl apply `
-            -f k8s/10-api.yaml
-
-          kubectl apply `
-            -f k8s/20-ui.yaml
-
-          kubectl -n $env:NAMESPACE `
-            set image deployment/imd-weather-api `
-            api=imd-weather-api:${{ github.sha }}
-
-          kubectl -n $env:NAMESPACE `
-            set image deployment/imd-weather-ui `
-            ui=imd-weather-ui:${{ github.sha }}
-
-          kubectl -n $env:NAMESPACE `
-            rollout status deployment/imd-weather-api `
-            --timeout=300s
-
-          kubectl -n $env:NAMESPACE `
-            rollout status deployment/imd-weather-ui `
-            --timeout=300s
-
-      - name: Verify ML connection
-
+      - name: Verify app can reach ML service
+        shell: pwsh
         run: |
-
-          kubectl -n $env:NAMESPACE exec deploy/imd-weather-api -- `
-          python -c "import requests;payload={'state':'Delhi','district':'New Delhi','target_date':'2026-11-15'};r=requests.post('http://imd-weather-ml:8000/forecast',json=payload,timeout=30);print(r.status_code);print(r.text);r.raise_for_status()"
-
-      - name: Verify deployments
-
-        run: |
-
-          kubectl -n $env:NAMESPACE get deployments
-
-          kubectl -n $env:NAMESPACE get pods
-
-          kubectl -n $env:NAMESPACE get svc
+          kubectl -n $env:NAMESPACE exec deploy/imd-weather-api -- python -c "import requests; payload={'state':'Delhi','district':'New Delhi','target_date':'2026-11-15'}; response=requests.post('http://imd-weather-api:8000/forecast', json=payload, timeout=20); print(response.status_code); print(response.text); response.raise_for_status()"
