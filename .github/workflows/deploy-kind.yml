@@ -53,8 +53,4 @@ jobs:
       - name: Verify app can reach ML service
         shell: pwsh
         run: |
-          $body = @{ state = "Delhi"; district = "New Delhi"; target_date = "2026-11-15" } | ConvertTo-Json
-          kubectl -n $env:NAMESPACE run app-smoke-test --rm -i --restart=Never --image=curlimages/curl:8.11.1 -- `
-            curl -fsS -X POST http://imd-weather-api:8000/forecast `
-            -H "Content-Type: application/json" `
-            -d "$body"
+          kubectl -n $env:NAMESPACE exec deploy/imd-weather-api -- python -c "import requests; payload={'state':'Delhi','district':'New Delhi','target_date':'2026-11-15'}; response=requests.post('http://imd-weather-api:8000/forecast', json=payload, timeout=20); print(response.status_code); print(response.text); response.raise_for_status()"
